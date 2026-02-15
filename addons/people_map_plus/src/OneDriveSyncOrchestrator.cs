@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.Processing;
 
 namespace PeopleMapPlus.Addon;
@@ -32,6 +33,8 @@ public sealed record OneDriveFolderListResult(
 
 public sealed class OneDriveSyncOrchestrator
 {
+    private const int ThumbnailMaxSidePx = 320;
+
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg",
@@ -372,6 +375,8 @@ public sealed class OneDriveSyncOrchestrator
                         && File.Exists(existing.LocalPath))
                     {
                         await ResizeImageIfNeededAsync(existing.LocalPath, options.MaxSize, cancellationToken, "existing");
+                        await EnsureThumbnailAsync(existing.LocalPath, cancellationToken, "existing");
+                        await IndexPhotoIfNeededAsync(remoteFile, existing.LocalPath, force: false, cancellationToken);
                         skipped++;
                         continue;
                     }
@@ -400,6 +405,7 @@ public sealed class OneDriveSyncOrchestrator
                         LastModifiedUtc: remoteFile.LastModifiedUtc,
                         LocalPath: localPath
                     ));
+                    await IndexPhotoIfNeededAsync(remoteFile, localPath, force: true, cancellationToken);
                     downloaded++;
                 }
             }
@@ -707,6 +713,7 @@ public sealed class OneDriveSyncOrchestrator
 
         await ResizeImageIfNeededAsync(tempPath, maxSize, cancellationToken, "downloaded");
         File.Move(tempPath, destinationPath, overwrite: true);
+        await EnsureThumbnailAsync(destinationPath, cancellationToken, "downloaded");
     }
 
     private async Task ResizeImageIfNeededAsync(string imagePath, int maxSize, CancellationToken cancellationToken, string source)
@@ -776,6 +783,289 @@ public sealed class OneDriveSyncOrchestrator
                 File.Delete(resizedPath);
             }
         }
+    }
+
+    private async Task EnsureThumbnailAsync(string imagePath, CancellationToken cancellationToken, string source)
+    {
+        var fileName = Path.GetFileName(imagePath);
+        if (fileName.StartsWith("thumb_", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(imagePath) ?? ".";
+        var thumbnailPath = Path.Combine(directory, "thumb_" + fileName);
+        var extension = Path.GetExtension(imagePath);
+        var tempThumbPath = Path.Combine(directory, $"thumb_{Path.GetFileNameWithoutExtension(imagePath)}.tmp{extension}");
+
+        try
+        {
+            if (!File.Exists(imagePath))
+            {
+                return;
+            }
+
+            var info = await Image.IdentifyAsync(imagePath, cancellationToken);
+            if (info is null)
+            {
+                return;
+            }
+
+            var maxSide = Math.Max(info.Width, info.Height);
+            var scale = maxSide > ThumbnailMaxSidePx
+                ? (double)ThumbnailMaxSidePx / maxSide
+                : 1.0;
+
+            var targetWidth = Math.Max(1, (int)Math.Round(info.Width * scale));
+            var targetHeight = Math.Max(1, (int)Math.Round(info.Height * scale));
+
+            using var image = await Image.LoadAsync(imagePath, cancellationToken);
+            if (scale < 1.0)
+            {
+                image.Mutate(ctx => ctx.Resize(new ResizeOptions
+                {
+                    Size = new Size(targetWidth, targetHeight),
+                    Mode = ResizeMode.Max
+                }));
+            }
+
+            await image.SaveAsync(tempThumbPath, cancellationToken);
+            File.Move(tempThumbPath, thumbnailPath, overwrite: true);
+
+            _logger.LogInformation(
+                "Thumbnail generated ({Source}) for {ImagePath} -> {ThumbPath} ({Width}x{Height}).",
+                source,
+                imagePath,
+                thumbnailPath,
+                targetWidth,
+                targetHeight
+            );
+        }
+        catch (SixLabors.ImageSharp.UnknownImageFormatException)
+        {
+            _logger.LogInformation("Thumbnail skipped for {ImagePath}: unsupported image format.", imagePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Thumbnail generation failed for {ImagePath}.", imagePath);
+        }
+        finally
+        {
+            if (File.Exists(tempThumbPath))
+            {
+                File.Delete(tempThumbPath);
+            }
+        }
+    }
+
+    private async Task IndexPhotoIfNeededAsync(
+        RemoteDriveFile remoteFile,
+        string localPath,
+        bool force,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var existing = _repository.GetPhotoIndex(remoteFile.ItemId);
+            if (!force && existing is not null
+                && string.Equals(existing.ETag, remoteFile.ETag, StringComparison.Ordinal)
+                && string.Equals(existing.LocalPath, localPath, StringComparison.Ordinal)
+                && File.Exists(existing.LocalPath))
+            {
+                return;
+            }
+
+            if (!File.Exists(localPath))
+            {
+                return;
+            }
+
+            var thumbnailPath = BuildThumbnailPath(localPath);
+            if (!File.Exists(thumbnailPath))
+            {
+                thumbnailPath = null;
+            }
+
+            DateTimeOffset? captureUtc = remoteFile.LastModifiedUtc;
+            double? latitude = null;
+            double? longitude = null;
+            int? width = null;
+            int? height = null;
+
+            var imageInfo = await Image.IdentifyAsync(localPath, cancellationToken);
+            if (imageInfo is not null)
+            {
+                width = imageInfo.Width;
+                height = imageInfo.Height;
+
+                if (TryExtractExifMetadata(imageInfo.Metadata.ExifProfile, out var exifCaptureUtc, out var exifLat, out var exifLon))
+                {
+                    captureUtc = exifCaptureUtc ?? captureUtc;
+                    latitude = exifLat;
+                    longitude = exifLon;
+                }
+            }
+
+            var hasGps = latitude is not null && longitude is not null;
+            _repository.UpsertPhotoIndex(new PhotoIndexRecord(
+                ItemId: remoteFile.ItemId,
+                ETag: remoteFile.ETag,
+                LocalPath: localPath,
+                ThumbnailPath: thumbnailPath,
+                CaptureUtc: captureUtc,
+                Latitude: latitude,
+                Longitude: longitude,
+                WidthPx: width,
+                HeightPx: height,
+                HasGps: hasGps,
+                SourceLastModifiedUtc: remoteFile.LastModifiedUtc,
+                IndexedAtUtc: DateTimeOffset.UtcNow
+            ));
+        }
+        catch (SixLabors.ImageSharp.UnknownImageFormatException)
+        {
+            _repository.UpsertPhotoIndex(new PhotoIndexRecord(
+                ItemId: remoteFile.ItemId,
+                ETag: remoteFile.ETag,
+                LocalPath: localPath,
+                ThumbnailPath: null,
+                CaptureUtc: remoteFile.LastModifiedUtc,
+                Latitude: null,
+                Longitude: null,
+                WidthPx: null,
+                HeightPx: null,
+                HasGps: false,
+                SourceLastModifiedUtc: remoteFile.LastModifiedUtc,
+                IndexedAtUtc: DateTimeOffset.UtcNow
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Photo index update failed for {ItemId} ({Path}).", remoteFile.ItemId, localPath);
+        }
+    }
+
+    private static bool TryExtractExifMetadata(
+        ExifProfile? exif,
+        out DateTimeOffset? captureUtc,
+        out double? latitude,
+        out double? longitude)
+    {
+        captureUtc = null;
+        latitude = null;
+        longitude = null;
+        if (exif is null)
+        {
+            return false;
+        }
+
+        var latValue = TryReadGpsCoordinate(exif, ExifTag.GPSLatitude, ExifTag.GPSLatitudeRef);
+        var lonValue = TryReadGpsCoordinate(exif, ExifTag.GPSLongitude, ExifTag.GPSLongitudeRef);
+        if (latValue is not null && lonValue is not null)
+        {
+            latitude = latValue;
+            longitude = lonValue;
+        }
+
+        captureUtc = TryReadCaptureUtc(exif);
+        return captureUtc is not null || (latitude is not null && longitude is not null);
+    }
+
+    private static DateTimeOffset? TryReadCaptureUtc(ExifProfile exif)
+    {
+        var rawDate = TryGetExifString(exif, ExifTag.DateTimeOriginal)
+            ?? TryGetExifString(exif, ExifTag.DateTimeDigitized)
+            ?? TryGetExifString(exif, ExifTag.DateTime);
+        if (string.IsNullOrWhiteSpace(rawDate))
+        {
+            return null;
+        }
+
+        if (!DateTime.TryParseExact(
+            rawDate.Trim(),
+            "yyyy:MM:dd HH:mm:ss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None,
+            out var parsedLocal))
+        {
+            return null;
+        }
+
+        var offsetText = TryGetExifString(exif, ExifTag.OffsetTimeOriginal)
+            ?? TryGetExifString(exif, ExifTag.OffsetTimeDigitized)
+            ?? TryGetExifString(exif, ExifTag.OffsetTime);
+
+        if (!string.IsNullOrWhiteSpace(offsetText)
+            && TimeSpan.TryParse(offsetText.Trim(), out var offset))
+        {
+            return new DateTimeOffset(parsedLocal, offset).ToUniversalTime();
+        }
+
+        return new DateTimeOffset(DateTime.SpecifyKind(parsedLocal, DateTimeKind.Utc));
+    }
+
+    private static string? TryGetExifString(ExifProfile exif, ExifTag<string> tag)
+    {
+        if (!exif.TryGetValue(tag, out IExifValue<string>? exifValue))
+        {
+            return null;
+        }
+
+        var value = exifValue.Value;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value;
+    }
+
+    private static double? TryReadGpsCoordinate(
+        ExifProfile exif,
+        ExifTag<Rational[]> valueTag,
+        ExifTag<string> refTag)
+    {
+        if (!exif.TryGetValue(valueTag, out IExifValue<Rational[]>? exifValues)
+            || exifValues.Value is null
+            || exifValues.Value.Length < 3)
+        {
+            return null;
+        }
+
+        var values = exifValues.Value;
+        var degrees = RationalToDouble(values[0]);
+        var minutes = RationalToDouble(values[1]);
+        var seconds = RationalToDouble(values[2]);
+
+        var decimalValue = degrees + (minutes / 60d) + (seconds / 3600d);
+        if (exif.TryGetValue(refTag, out IExifValue<string>? axisRefValue)
+            && !string.IsNullOrWhiteSpace(axisRefValue.Value))
+        {
+            var normalized = axisRefValue.Value.Trim().ToUpperInvariant();
+            if (normalized is "S" or "W")
+            {
+                decimalValue *= -1;
+            }
+        }
+
+        return decimalValue;
+    }
+
+    private static double RationalToDouble(Rational value)
+    {
+        if (value.Denominator == 0)
+        {
+            return 0;
+        }
+
+        return (double)value.Numerator / value.Denominator;
+    }
+
+    private static string BuildThumbnailPath(string imagePath)
+    {
+        var directory = Path.GetDirectoryName(imagePath) ?? ".";
+        var fileName = Path.GetFileName(imagePath);
+        return Path.Combine(directory, "thumb_" + fileName);
     }
 
     private static string Truncate(string input, int maxLength)

@@ -15,6 +15,7 @@ This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
    - `/api/people_map_plus/health`
    - `/api/people_map_plus/sync/status`
    - `POST /api/people_map_plus/sync/run`
+   - `/api/people_map_plus/photos?limit=50&hours=24`
    - `/api/people_map_plus/onedrive/folders?path=/`
    - `POST /api/people_map_plus/onedrive/device/start`
    - `POST /api/people_map_plus/onedrive/device/poll`
@@ -58,3 +59,24 @@ Use `List Folders` in Web UI to discover valid `onedrive_folder_path` values wit
 5. Supports Device Code connect flow from ingress page (`Connect to OneDrive`).
 6. Auto-resizes images larger than `max_size` on any side (aspect ratio preserved).
 7. Writes log entry when resize is required and when resize is completed/skipped.
+8. Generates `thumb_` preview copy for each image (max side `320px`) in the same folder.
+9. Extracts EXIF metadata (GPS + capture time when available) and stores index in SQLite.
+
+## Photos API for map layer
+
+`GET /api/people_map_plus/photos`
+
+Query params:
+
+1. `limit` - number of photos (`1..500`, default `50`).
+2. `hours` - recent window in hours (if `fromUtc` is not provided).
+3. `fromUtc` / `toUtc` - ISO-8601 UTC boundaries.
+4. `minLat`, `maxLat`, `minLon`, `maxLon` - optional bbox filter (all 4 required together).
+
+Response contains geotagged photos only, including:
+
+1. `itemId`
+2. `capturedAtUtc`
+3. `lat` / `lon`
+4. `mediaUrl` (`/media/local/...`)
+5. `thumbnailUrl` (`/media/local/...` for `thumb_` file)
