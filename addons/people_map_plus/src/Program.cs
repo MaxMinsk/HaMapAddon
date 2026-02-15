@@ -42,7 +42,7 @@ app.MapGet("/api/people_map_plus/health", (OneDriveSyncOrchestrator orchestrator
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.9",
+        version = "0.1.10",
         lastSync = orchestrator.GetLastResult()
     });
 });
@@ -71,6 +71,16 @@ app.MapPost("/api/people_map_plus/sync/run", async (OneDriveSyncOrchestrator orc
 {
     var result = await orchestrator.RunOnceAsync("manual", cancellationToken);
     var statusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status500InternalServerError;
+    return Results.Json(result, statusCode: statusCode);
+});
+
+app.MapGet("/api/people_map_plus/onedrive/folders", async (
+    string? path,
+    OneDriveSyncOrchestrator orchestrator,
+    CancellationToken cancellationToken) =>
+{
+    var result = await orchestrator.ListFoldersAsync(path, cancellationToken);
+    var statusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest;
     return Results.Json(result, statusCode: statusCode);
 });
 

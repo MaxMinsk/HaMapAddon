@@ -14,6 +14,20 @@ public sealed record SyncResult(
     DateTimeOffset FinishedAtUtc
 );
 
+public sealed record OneDriveFolderItem(
+    string Id,
+    string Name,
+    string Path
+);
+
+public sealed record OneDriveFolderListResult(
+    bool Success,
+    string Status,
+    string Message,
+    string RequestedPath,
+    IReadOnlyList<OneDriveFolderItem> Folders
+);
+
 public sealed class OneDriveSyncOrchestrator
 {
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -49,6 +63,116 @@ public sealed class OneDriveSyncOrchestrator
     }
 
     public SyncResult? GetLastResult() => _lastResult;
+
+    public async Task<OneDriveFolderListResult> ListFoldersAsync(string? requestedPath, CancellationToken cancellationToken)
+    {
+        var options = _optionsProvider.Load();
+        var normalizedPath = NormalizeFolderPath(requestedPath, options.OneDriveFolderPath);
+
+        var hasConfigRefreshToken = !string.IsNullOrWhiteSpace(options.OneDriveRefreshToken);
+        var hasStoredRefreshToken = await _tokenStore.HasRefreshTokenAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(options.OneDriveClientId) || (!hasConfigRefreshToken && !hasStoredRefreshToken))
+        {
+            return new OneDriveFolderListResult(
+                false,
+                "invalid_config",
+                "Missing OneDrive client_id or refresh token (configure token or connect via device flow).",
+                normalizedPath,
+                []
+            );
+        }
+
+        var accessToken = await RequestAccessTokenAsync(options, cancellationToken);
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return new OneDriveFolderListResult(
+                false,
+                "auth_error",
+                "Unable to get OneDrive access token.",
+                normalizedPath,
+                []
+            );
+        }
+
+        var driveResource = BuildDriveResource(options);
+        var queue = new Queue<string>();
+        queue.Enqueue(BuildChildrenUrlForPath(driveResource, normalizedPath));
+        var folders = new List<OneDriveFolderItem>();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var pageCount = 0;
+
+        while (queue.Count > 0 && pageCount < 20)
+        {
+            pageCount++;
+            var url = queue.Dequeue();
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            using var graphClient = _httpClientFactory.CreateClient(nameof(OneDriveSyncOrchestrator));
+            using var response = await graphClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = ExtractGraphError(body);
+                return new OneDriveFolderListResult(
+                    false,
+                    "graph_error",
+                    $"Graph request failed with status {(int)response.StatusCode}: {Truncate(details, 220)}",
+                    normalizedPath,
+                    []
+                );
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.TryGetProperty("value", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    if (!TryGetFolderId(item, out var folderId))
+                    {
+                        continue;
+                    }
+
+                    if (!seenIds.Add(folderId))
+                    {
+                        continue;
+                    }
+
+                    var name = item.TryGetProperty("name", out var nameElement)
+                        ? nameElement.GetString() ?? folderId
+                        : folderId;
+
+                    folders.Add(new OneDriveFolderItem(
+                        Id: folderId,
+                        Name: name,
+                        Path: JoinFolderPath(normalizedPath, name)
+                    ));
+                }
+            }
+
+            if (root.TryGetProperty("@odata.nextLink", out var nextLinkElement))
+            {
+                var nextLink = nextLinkElement.GetString();
+                if (!string.IsNullOrWhiteSpace(nextLink))
+                {
+                    queue.Enqueue(nextLink);
+                }
+            }
+        }
+
+        var message = folders.Count == 0
+            ? "No subfolders found for this path."
+            : $"Found {folders.Count} subfolder(s).";
+
+        return new OneDriveFolderListResult(
+            true,
+            "ok",
+            message,
+            normalizedPath,
+            folders.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToArray()
+        );
+    }
 
     public async Task<SyncResult> RunOnceAsync(string reason, CancellationToken cancellationToken)
     {
@@ -379,6 +503,16 @@ public sealed class OneDriveSyncOrchestrator
         return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(options.OneDriveFolderPath)}:/children?$top=200";
     }
 
+    private static string BuildChildrenUrlForPath(string driveResource, string normalizedPath)
+    {
+        if (normalizedPath == "/")
+        {
+            return $"https://graph.microsoft.com/v1.0/{driveResource}/root/children?$top=200";
+        }
+
+        return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(normalizedPath)}:/children?$top=200";
+    }
+
     private static string BuildFolderChildrenUrl(string driveResource, string folderItemId)
     {
         return $"https://graph.microsoft.com/v1.0/{driveResource}/items/{Uri.EscapeDataString(folderItemId)}/children?$top=200";
@@ -394,6 +528,38 @@ public sealed class OneDriveSyncOrchestrator
     {
         var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         return "/" + string.Join('/', segments.Select(Uri.EscapeDataString));
+    }
+
+    private static string NormalizeFolderPath(string? requestedPath, string fallbackPath)
+    {
+        var path = string.IsNullOrWhiteSpace(requestedPath) ? fallbackPath : requestedPath!;
+        path = path.Replace('\\', '/').Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        if (!path.StartsWith('/'))
+        {
+            path = "/" + path;
+        }
+
+        while (path.EndsWith('/') && path.Length > 1)
+        {
+            path = path[..^1];
+        }
+
+        return path;
+    }
+
+    private static string JoinFolderPath(string basePath, string folderName)
+    {
+        if (basePath == "/")
+        {
+            return "/" + folderName;
+        }
+
+        return basePath + "/" + folderName;
     }
 
     private static bool TryParseDriveFile(JsonElement element, out RemoteDriveFile file)

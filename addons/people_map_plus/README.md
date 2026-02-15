@@ -15,6 +15,7 @@ This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
    - `/api/people_map_plus/health`
    - `/api/people_map_plus/sync/status`
    - `POST /api/people_map_plus/sync/run`
+   - `/api/people_map_plus/onedrive/folders?path=/`
    - `POST /api/people_map_plus/onedrive/device/start`
    - `POST /api/people_map_plus/onedrive/device/poll`
    - `/api/people_map_plus/onedrive/device/status`
@@ -44,6 +45,8 @@ Configure from Add-on page -> **Configuration**:
 3. Click `Connect to OneDrive`.
 4. Complete Microsoft verification with shown code.
 5. Click `Check Authorization`.
+
+Use `List Folders` in Web UI to discover valid `onedrive_folder_path` values without guessing.
 
 ## Sync behavior
 

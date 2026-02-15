@@ -37,6 +37,20 @@ public static class IngressPage
   </div>
 
   <div class="card">
+    <h2>Browse OneDrive Folders</h2>
+    <div class="row">
+      <label for="folderPath">Path</label>
+    </div>
+    <div class="row">
+      <input id="folderPath" type="text" value="/" style="width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #444; background: #0c0c0c; color: #f3f3f3;" />
+    </div>
+    <div class="row">
+      <button id="foldersBtn" class="secondary">List Folders</button>
+    </div>
+    <pre id="foldersOut">Use path "/" to list root folders.</pre>
+  </div>
+
+  <div class="card">
     <h2>Status</h2>
     <button id="refreshBtn" class="secondary">Refresh Status</button>
     <pre id="statusOut">Loading...</pre>
@@ -44,6 +58,7 @@ public static class IngressPage
 
   <script>
     const connectOut = document.getElementById("connectOut");
+    const foldersOut = document.getElementById("foldersOut");
     const statusOut = document.getElementById("statusOut");
 
     async function call(url, method = "GET") {
@@ -86,6 +101,12 @@ public static class IngressPage
       await refreshStatus();
     };
 
+    document.getElementById("foldersBtn").onclick = async () => {
+      const path = (document.getElementById("folderPath").value || "/").trim();
+      const r = await call("./api/people_map_plus/onedrive/folders?path=" + encodeURIComponent(path));
+      show(foldersOut, "Folders result", r);
+    };
+
     document.getElementById("refreshBtn").onclick = refreshStatus;
     refreshStatus();
   </script>
@@ -93,4 +114,3 @@ public static class IngressPage
 </html>
 """;
 }
-
