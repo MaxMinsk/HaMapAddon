@@ -16,11 +16,16 @@ builder.Services.AddHttpClient(nameof(OneDriveDeviceAuthService), client =>
 {
     client.Timeout = TimeSpan.FromSeconds(120);
 });
+builder.Services.AddHttpClient(nameof(HomeAssistantHistoryService), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(180);
+});
 builder.Services.AddSingleton<AddonOptionsProvider>();
 builder.Services.AddSingleton<OneDriveTokenStore>();
 builder.Services.AddSingleton<SyncRepository>();
 builder.Services.AddSingleton<OneDriveSyncOrchestrator>();
 builder.Services.AddSingleton<OneDriveDeviceAuthService>();
+builder.Services.AddSingleton<HomeAssistantHistoryService>();
 builder.Services.AddHostedService<OneDriveSyncWorker>();
 
 var app = builder.Build();
@@ -42,7 +47,7 @@ app.MapGet("/api/people_map_plus/health", (OneDriveSyncOrchestrator orchestrator
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.14",
+        version = "0.1.15",
         lastSync = orchestrator.GetLastResult()
     });
 });
@@ -177,6 +182,75 @@ app.MapGet("/api/people_map_plus/photos", (
         },
         items
     });
+});
+
+app.MapGet("/api/people_map_plus/tracks", async (
+    string? entities,
+    int? days,
+    string? fromUtc,
+    string? toUtc,
+    int? maxPoints,
+    double? minDistanceMeters,
+    HomeAssistantHistoryService historyService,
+    CancellationToken cancellationToken) =>
+{
+    if (!TryParseOptionalDateTimeOffset(fromUtc, out var parsedFromUtc))
+    {
+        return Results.Json(new
+        {
+            success = false,
+            status = "invalid_from_utc",
+            message = "fromUtc must be ISO-8601 timestamp."
+        }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (!TryParseOptionalDateTimeOffset(toUtc, out var parsedToUtc))
+    {
+        return Results.Json(new
+        {
+            success = false,
+            status = "invalid_to_utc",
+            message = "toUtc must be ISO-8601 timestamp."
+        }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var to = parsedToUtc ?? DateTimeOffset.UtcNow;
+    var periodDays = Math.Clamp(days ?? 1, 1, 30);
+    var from = parsedFromUtc ?? to.AddDays(-periodDays);
+    if (from >= to)
+    {
+        return Results.Json(new
+        {
+            success = false,
+            status = "invalid_range",
+            message = "fromUtc must be earlier than toUtc."
+        }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var entityList = (entities ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    if (entityList.Length == 0)
+    {
+        return Results.Json(new
+        {
+            success = false,
+            status = "invalid_entities",
+            message = "Provide entities as comma-separated list, for example entities=person.max,person.maria."
+        }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var result = await historyService.QueryTracksAsync(
+        entityList,
+        from.ToUniversalTime(),
+        to.ToUniversalTime(),
+        maxPointsPerEntity: Math.Clamp(maxPoints ?? 500, 50, 5000),
+        minDistanceMeters: Math.Clamp(minDistanceMeters ?? 0, 0, 2000),
+        cancellationToken);
+
+    var statusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status500InternalServerError;
+    return Results.Json(result, statusCode: statusCode);
 });
 
 app.MapGet("/api/people_map_plus/onedrive/device/status", async (

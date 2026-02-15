@@ -16,6 +16,7 @@ This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
    - `/api/people_map_plus/sync/status`
    - `POST /api/people_map_plus/sync/run`
    - `/api/people_map_plus/photos?limit=50&hours=24`
+   - `/api/people_map_plus/tracks?entities=person.max&days=1`
    - `/api/people_map_plus/onedrive/folders?path=/`
    - `POST /api/people_map_plus/onedrive/device/start`
    - `POST /api/people_map_plus/onedrive/device/poll`
@@ -80,3 +81,15 @@ Response contains geotagged photos only, including:
 3. `lat` / `lon`
 4. `mediaUrl` (`/media/local/...`)
 5. `thumbnailUrl` (`/media/local/...` for `thumb_` file)
+
+## Tracks API for map layer
+
+`GET /api/people_map_plus/tracks`
+
+Query params:
+
+1. `entities` - required comma-separated entities (`person.max,person.maria`).
+2. `days` - period in days (`1..30`, default `1`) when `fromUtc` is not provided.
+3. `fromUtc` / `toUtc` - optional ISO-8601 UTC bounds.
+4. `maxPoints` - max points per entity (`50..5000`, default `500`).
+5. `minDistanceMeters` - simple distance dedupe (`0..2000`, default `0`).
