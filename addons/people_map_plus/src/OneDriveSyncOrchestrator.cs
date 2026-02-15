@@ -158,6 +158,7 @@ public sealed class OneDriveSyncOrchestrator
         var stateKeyPrefix = BuildStateKeyPrefix(options);
         var deltaLink = _repository.GetState($"{stateKeyPrefix}:delta_link");
         var pageUrl = string.IsNullOrWhiteSpace(deltaLink) ? BuildInitialDeltaUrl(options) : deltaLink;
+        var deltaResetAttempted = false;
 
         var examined = 0;
         var skipped = 0;
@@ -175,6 +176,21 @@ public sealed class OneDriveSyncOrchestrator
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 var graphDetails = ExtractGraphError(body);
+
+                if (!deltaResetAttempted
+                    && ShouldResetDeltaState(response.StatusCode, graphDetails)
+                    && !string.IsNullOrWhiteSpace(deltaLink))
+                {
+                    deltaResetAttempted = true;
+                    _logger.LogInformation(
+                        "Detected invalid delta state. Resetting stored delta link and retrying from initial delta URL."
+                    );
+                    _repository.SetState($"{stateKeyPrefix}:delta_link", string.Empty);
+                    deltaLink = null;
+                    pageUrl = BuildInitialDeltaUrl(options);
+                    continue;
+                }
+
                 _logger.LogWarning(
                     "Graph delta request failed. Status={StatusCode}, Details={Details}, Body={Body}",
                     (int)response.StatusCode,
@@ -542,6 +558,24 @@ public sealed class OneDriveSyncOrchestrator
         }
 
         return body;
+    }
+
+    private static bool ShouldResetDeltaState(System.Net.HttpStatusCode statusCode, string details)
+    {
+        if (statusCode is not System.Net.HttpStatusCode.BadRequest and not System.Net.HttpStatusCode.Gone)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return false;
+        }
+
+        return details.Contains("ObjectHandle is Invalid", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("syncStateNotFound", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("resyncRequired", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("delta token", StringComparison.OrdinalIgnoreCase);
     }
 
     private SyncResult Remember(SyncResult result)
