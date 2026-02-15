@@ -174,16 +174,18 @@ public sealed class OneDriveSyncOrchestrator
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var graphDetails = ExtractGraphError(body);
                 _logger.LogWarning(
-                    "Graph delta request failed. Status={StatusCode}, Body={Body}",
+                    "Graph delta request failed. Status={StatusCode}, Details={Details}, Body={Body}",
                     (int)response.StatusCode,
+                    graphDetails,
                     Truncate(body, 400)
                 );
 
                 return new SyncResult(
                     Success: false,
                     Status: "graph_error",
-                    Message: $"Graph request failed with status {(int)response.StatusCode}.",
+                    Message: $"Graph request failed with status {(int)response.StatusCode}: {Truncate(graphDetails, 220)}",
                     Examined: examined,
                     Downloaded: downloaded,
                     Skipped: skipped,
@@ -362,10 +364,10 @@ public sealed class OneDriveSyncOrchestrator
 
         if (options.OneDriveFolderPath == "/")
         {
-            return $"https://graph.microsoft.com/v1.0/{driveResource}/root/delta?$top=200";
+            return $"https://graph.microsoft.com/v1.0/{driveResource}/root/delta";
         }
 
-        return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(options.OneDriveFolderPath)}:/delta?$top=200";
+        return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(options.OneDriveFolderPath)}:/delta";
     }
 
     private static string BuildStateKeyPrefix(NormalizedAddonOptions options)
@@ -505,6 +507,41 @@ public sealed class OneDriveSyncOrchestrator
         }
 
         return input[..maxLength] + "...";
+    }
+
+    private static string ExtractGraphError(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return "no response body";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.TryGetProperty("error", out var errorElement))
+            {
+                var code = errorElement.TryGetProperty("code", out var codeElement)
+                    ? codeElement.GetString()
+                    : null;
+                var message = errorElement.TryGetProperty("message", out var messageElement)
+                    ? messageElement.GetString()
+                    : null;
+
+                var combined = $"{code}: {message}".Trim(' ', ':');
+                if (!string.IsNullOrWhiteSpace(combined))
+                {
+                    return combined;
+                }
+            }
+        }
+        catch
+        {
+            // ignore parse issues
+        }
+
+        return body;
     }
 
     private SyncResult Remember(SyncResult result)
