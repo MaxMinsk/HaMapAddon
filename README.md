@@ -7,7 +7,7 @@ Infrastructure scaffold for developing and releasing a Home Assistant add-on wit
 1. Home Assistant add-on repository structure (`repository.yaml`, `addons/people_map_plus/*`) with C# backend scaffold.
 2. VS Code workspace setup (`.vscode/*`) and reusable tasks.
 3. CI workflow for validation and test build (`.github/workflows/ci.yml`).
-4. Release workflow for multi-arch image publishing to GHCR (`.github/workflows/release-addon.yml`).
+4. Release workflow for amd64 image publishing to GHCR (`.github/workflows/release-addon.yml`).
 5. Helper scripts for validation and release checks (`scripts/*`).
 
 ## First-time setup
@@ -25,9 +25,7 @@ Infrastructure scaffold for developing and releasing a Home Assistant add-on wit
 2. Commit and push to `main`.
 3. Create and push tag `v0.1.1`.
 4. Workflow publishes images to:
-   `ghcr.io/<owner>/people-map-plus-addon-amd64:0.1.1`,
-   `ghcr.io/<owner>/people-map-plus-addon-aarch64:0.1.1`,
-   `ghcr.io/<owner>/people-map-plus-addon-armv7:0.1.1`
+   `ghcr.io/<owner>/people-map-plus-addon-amd64:0.1.1`
 5. Home Assistant checks the add-on repo and shows `Update` when new `version` is detected.
 
 Quick local helper:

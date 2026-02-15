@@ -14,8 +14,6 @@ panel_icon: mdi:map-marker-path
 panel_title: People Map Plus
 arch:
   - amd64
-  - aarch64
-  - armv7
 image: "ghcr.io/maxminsk/people-map-plus-addon-{arch}"
 map:
   - "media:rw"
