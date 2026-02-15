@@ -50,8 +50,9 @@ Use `List Folders` in Web UI to discover valid `onedrive_folder_path` values wit
 
 ## Sync behavior
 
-1. Uses Microsoft Graph delta API and persists `deltaLink`.
+1. Uses Microsoft Graph `children` traversal for stable folder scanning (with pagination).
 2. Filters files by last modified date (`lookback_days`).
 3. Downloads supported image types (`jpg`, `jpeg`, `png`, `heic`, `heif`, `webp`).
 4. Avoids duplicates by OneDrive `item_id` + `eTag`.
 5. Supports Device Code connect flow from ingress page (`Connect to OneDrive`).
+6. Auto-resizes images larger than 2500px on any side to max side 2500px (aspect ratio preserved).

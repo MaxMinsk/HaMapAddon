@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 
 namespace PeopleMapPlus.Addon;
 
@@ -30,6 +32,8 @@ public sealed record OneDriveFolderListResult(
 
 public sealed class OneDriveSyncOrchestrator
 {
+    private const int MaxImageSidePx = 2500;
+
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg",
@@ -699,7 +703,65 @@ public sealed class OneDriveSyncOrchestrator
             await source.CopyToAsync(target, cancellationToken);
         }
 
+        await ResizeImageIfNeededAsync(tempPath, cancellationToken);
         File.Move(tempPath, destinationPath, overwrite: true);
+    }
+
+    private async Task ResizeImageIfNeededAsync(string imagePath, CancellationToken cancellationToken)
+    {
+        var resizedPath = imagePath + ".resized";
+        try
+        {
+            var info = await Image.IdentifyAsync(imagePath, cancellationToken);
+            if (info is null)
+            {
+                return;
+            }
+
+            if (info.Width <= MaxImageSidePx && info.Height <= MaxImageSidePx)
+            {
+                return;
+            }
+
+            var maxSide = Math.Max(info.Width, info.Height);
+            var scale = (double)MaxImageSidePx / maxSide;
+            var targetWidth = Math.Max(1, (int)Math.Round(info.Width * scale));
+            var targetHeight = Math.Max(1, (int)Math.Round(info.Height * scale));
+
+            using var image = await Image.LoadAsync(imagePath, cancellationToken);
+            image.Mutate(ctx => ctx.Resize(new ResizeOptions
+            {
+                Size = new Size(targetWidth, targetHeight),
+                Mode = ResizeMode.Max
+            }));
+
+            await image.SaveAsync(resizedPath, cancellationToken);
+            File.Move(resizedPath, imagePath, overwrite: true);
+
+            _logger.LogInformation(
+                "Resized image {ImagePath} from {OriginalWidth}x{OriginalHeight} to {TargetWidth}x{TargetHeight}.",
+                imagePath,
+                info.Width,
+                info.Height,
+                targetWidth,
+                targetHeight
+            );
+        }
+        catch (SixLabors.ImageSharp.UnknownImageFormatException)
+        {
+            // Keep original file for unsupported codecs (for example HEIC when decoder is unavailable).
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Image resize failed for {ImagePath}. Keeping original file.", imagePath);
+        }
+        finally
+        {
+            if (File.Exists(resizedPath))
+            {
+                File.Delete(resizedPath);
+            }
+        }
     }
 
     private static string Truncate(string input, int maxLength)
