@@ -25,7 +25,7 @@ app.MapGet("/api/people_map_plus/health", () =>
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.1"
+        version = "0.1.2"
     });
 });
 
