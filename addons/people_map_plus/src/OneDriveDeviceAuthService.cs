@@ -253,7 +253,7 @@ public sealed class OneDriveDeviceAuthService
             return false;
         }
 
-        root.TryGetProperty("verification_uri_complete", out var completeElement);
+        var verificationUriComplete = TryGetOptionalString(root, "verification_uri_complete");
         var message = root.TryGetProperty("message", out var msgElement) && !string.IsNullOrWhiteSpace(msgElement.GetString())
             ? msgElement.GetString()!
             : $"Open {verificationUri} and enter code {userCode}.";
@@ -262,7 +262,7 @@ public sealed class OneDriveDeviceAuthService
             DeviceCode: deviceCode,
             UserCode: userCode,
             VerificationUri: verificationUri,
-            VerificationUriComplete: completeElement.GetString(),
+            VerificationUriComplete: verificationUriComplete,
             Message: message,
             ExpiresInSeconds: expiresIn,
             IntervalSeconds: interval,
@@ -294,6 +294,28 @@ public sealed class OneDriveDeviceAuthService
     {
         value = default;
         return root.TryGetProperty(property, out var element) && element.TryGetInt32(out value);
+    }
+
+    private static string? TryGetOptionalString(JsonElement root, string property)
+    {
+        if (!root.TryGetProperty(property, out var element))
+        {
+            return null;
+        }
+
+        if (element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        try
+        {
+            return element.GetString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string Truncate(string input, int maxLength)

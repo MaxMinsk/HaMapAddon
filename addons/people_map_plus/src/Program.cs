@@ -42,7 +42,7 @@ app.MapGet("/api/people_map_plus/health", (OneDriveSyncOrchestrator orchestrator
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.5",
+        version = "0.1.6",
         lastSync = orchestrator.GetLastResult()
     });
 });
