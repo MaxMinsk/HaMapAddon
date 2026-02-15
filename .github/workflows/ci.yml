@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate repository scaffold
+        run: bash scripts/validate-addon.sh
+
+      - name: Build test image (amd64)
+        run: |
+          docker build \
+            -t people-map-plus-addon:test \
+            addons/people_map_plus

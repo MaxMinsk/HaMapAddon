@@ -1,0 +1,10 @@
+{
+  "name": "People Map Plus Card",
+  "render_readme": true,
+  "content_in_root": true,
+  "filename": "dist/people-map-plus-card.js",
+  "homeassistant": "2024.1.0",
+  "country": [],
+  "zip_release": false
+}
+

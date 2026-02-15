@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Addon: Validate repository",
+      "type": "shell",
+      "command": "bash scripts/validate-addon.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Addon: Build local image (amd64)",
+      "type": "shell",
+      "command": "docker build -t people-map-plus-addon:dev addons/people_map_plus",
+      "problemMatcher": []
+    }
+  ]
+}

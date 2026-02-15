@@ -1,0 +1,18 @@
+{
+  "name": "people-map-plus-card",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Home Assistant Lovelace custom card: people map plus",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch --mode development",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "lit": "^3.2.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  }
+}
+
