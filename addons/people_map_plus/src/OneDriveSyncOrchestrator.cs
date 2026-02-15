@@ -695,7 +695,10 @@ public sealed class OneDriveSyncOrchestrator
         using var response = await client.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var tempPath = destinationPath + ".tmp";
+        var extension = Path.GetExtension(destinationPath);
+        var fileStem = Path.GetFileNameWithoutExtension(destinationPath);
+        var directory = Path.GetDirectoryName(destinationPath) ?? ".";
+        var tempPath = Path.Combine(directory, $"{fileStem}.tmp{extension}");
         await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
         await using (var target = File.Create(tempPath))
         {
@@ -708,7 +711,10 @@ public sealed class OneDriveSyncOrchestrator
 
     private async Task ResizeImageIfNeededAsync(string imagePath, int maxSize, CancellationToken cancellationToken, string source)
     {
-        var resizedPath = imagePath + ".resized";
+        var extension = Path.GetExtension(imagePath);
+        var fileStem = Path.GetFileNameWithoutExtension(imagePath);
+        var directory = Path.GetDirectoryName(imagePath) ?? ".";
+        var resizedPath = Path.Combine(directory, $"{fileStem}.resized{extension}");
         try
         {
             var info = await Image.IdentifyAsync(imagePath, cancellationToken);
