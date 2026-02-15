@@ -15,6 +15,9 @@ This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
    - `/api/people_map_plus/health`
    - `/api/people_map_plus/sync/status`
    - `POST /api/people_map_plus/sync/run`
+   - `POST /api/people_map_plus/onedrive/device/start`
+   - `POST /api/people_map_plus/onedrive/device/poll`
+   - `/api/people_map_plus/onedrive/device/status`
 
 ## Configuration in Home Assistant UI
 
@@ -23,7 +26,7 @@ Configure from Add-on page -> **Configuration**:
 1. `onedrive_enabled` - enable/disable sync.
 2. `onedrive_client_id` - Azure app client id.
 3. `onedrive_client_secret` - optional secret (required for confidential app).
-4. `onedrive_refresh_token` - refresh token for delegated access.
+4. `onedrive_refresh_token` - optional manual refresh token (can be empty if using Connect button).
 5. `onedrive_tenant` - default `consumers` (for personal OneDrive).
 6. `onedrive_scope` - default `offline_access Files.Read User.Read`.
 7. `onedrive_drive_id` - optional custom drive id, empty means `me/drive`.
@@ -34,9 +37,18 @@ Configure from Add-on page -> **Configuration**:
 12. `max_files_per_run` - safety cap per sync run.
 13. `run_sync_on_startup` - run once when add-on starts.
 
+## Connect to OneDrive from add-on page
+
+1. Save `onedrive_client_id` (and `onedrive_client_secret` if needed).
+2. Open add-on panel (Info tab -> `Open Web UI`).
+3. Click `Connect to OneDrive`.
+4. Complete Microsoft verification with shown code.
+5. Click `Check Authorization`.
+
 ## Sync behavior
 
 1. Uses Microsoft Graph delta API and persists `deltaLink`.
 2. Filters files by last modified date (`lookback_days`).
 3. Downloads supported image types (`jpg`, `jpeg`, `png`, `heic`, `heif`, `webp`).
 4. Avoids duplicates by OneDrive `item_id` + `eTag`.
+5. Supports Device Code connect flow from ingress page (`Connect to OneDrive`).

@@ -28,6 +28,7 @@ public sealed class OneDriveSyncOrchestrator
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly AddonOptionsProvider _optionsProvider;
+    private readonly OneDriveTokenStore _tokenStore;
     private readonly SyncRepository _repository;
     private readonly ILogger<OneDriveSyncOrchestrator> _logger;
     private readonly SemaphoreSlim _runLock = new(1, 1);
@@ -36,11 +37,13 @@ public sealed class OneDriveSyncOrchestrator
     public OneDriveSyncOrchestrator(
         IHttpClientFactory httpClientFactory,
         AddonOptionsProvider optionsProvider,
+        OneDriveTokenStore tokenStore,
         SyncRepository repository,
         ILogger<OneDriveSyncOrchestrator> logger)
     {
         _httpClientFactory = httpClientFactory;
         _optionsProvider = optionsProvider;
+        _tokenStore = tokenStore;
         _repository = repository;
         _logger = logger;
     }
@@ -64,12 +67,14 @@ public sealed class OneDriveSyncOrchestrator
             ));
         }
 
-        if (string.IsNullOrWhiteSpace(options.OneDriveClientId) || string.IsNullOrWhiteSpace(options.OneDriveRefreshToken))
+        var hasConfigRefreshToken = !string.IsNullOrWhiteSpace(options.OneDriveRefreshToken);
+        var hasStoredRefreshToken = await _tokenStore.HasRefreshTokenAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(options.OneDriveClientId) || (!hasConfigRefreshToken && !hasStoredRefreshToken))
         {
             return Remember(new SyncResult(
                 Success: false,
                 Status: "invalid_config",
-                Message: "Missing OneDrive client_id or refresh_token.",
+                Message: "Missing OneDrive client_id or refresh token (configure token or connect via device flow).",
                 Examined: 0,
                 Downloaded: 0,
                 Skipped: 0,
@@ -299,12 +304,21 @@ public sealed class OneDriveSyncOrchestrator
 
     private async Task<string?> RequestAccessTokenAsync(NormalizedAddonOptions options, CancellationToken cancellationToken)
     {
+        var refreshToken = string.IsNullOrWhiteSpace(options.OneDriveRefreshToken)
+            ? await _tokenStore.GetRefreshTokenAsync(cancellationToken)
+            : options.OneDriveRefreshToken;
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return null;
+        }
+
         var tokenEndpoint = $"https://login.microsoftonline.com/{options.OneDriveTenant}/oauth2/v2.0/token";
         var payload = new Dictionary<string, string>
         {
             ["client_id"] = options.OneDriveClientId,
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = options.OneDriveRefreshToken,
+            ["refresh_token"] = refreshToken,
             ["scope"] = options.OneDriveScope
         };
         if (!string.IsNullOrWhiteSpace(options.OneDriveClientSecret))
@@ -326,6 +340,12 @@ public sealed class OneDriveSyncOrchestrator
         }
 
         using var document = JsonDocument.Parse(body);
+        if (document.RootElement.TryGetProperty("refresh_token", out var newRefreshTokenElement)
+            && !string.IsNullOrWhiteSpace(newRefreshTokenElement.GetString()))
+        {
+            await _tokenStore.SetRefreshTokenAsync(newRefreshTokenElement.GetString()!, cancellationToken);
+        }
+
         if (!document.RootElement.TryGetProperty("access_token", out var accessToken))
         {
             return null;
@@ -502,4 +522,3 @@ public sealed class OneDriveSyncOrchestrator
         DateTimeOffset LastModifiedUtc
     );
 }
-

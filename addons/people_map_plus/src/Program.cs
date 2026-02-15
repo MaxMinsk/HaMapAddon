@@ -12,9 +12,15 @@ builder.Services.AddHttpClient(nameof(OneDriveSyncOrchestrator), client =>
 {
     client.Timeout = TimeSpan.FromSeconds(120);
 });
+builder.Services.AddHttpClient(nameof(OneDriveDeviceAuthService), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
 builder.Services.AddSingleton<AddonOptionsProvider>();
+builder.Services.AddSingleton<OneDriveTokenStore>();
 builder.Services.AddSingleton<SyncRepository>();
 builder.Services.AddSingleton<OneDriveSyncOrchestrator>();
+builder.Services.AddSingleton<OneDriveDeviceAuthService>();
 builder.Services.AddHostedService<OneDriveSyncWorker>();
 
 var app = builder.Build();
@@ -36,16 +42,19 @@ app.MapGet("/api/people_map_plus/health", (OneDriveSyncOrchestrator orchestrator
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.3",
+        version = "0.1.4",
         lastSync = orchestrator.GetLastResult()
     });
 });
 
-app.MapGet("/api/people_map_plus/sync/status", (
+app.MapGet("/api/people_map_plus/sync/status", async (
     AddonOptionsProvider optionsProvider,
-    OneDriveSyncOrchestrator orchestrator) =>
+    OneDriveSyncOrchestrator orchestrator,
+    OneDriveTokenStore tokenStore,
+    CancellationToken cancellationToken) =>
 {
     var options = optionsProvider.Load();
+    var hasStoredRefreshToken = await tokenStore.HasRefreshTokenAsync(cancellationToken);
     return Results.Ok(new
     {
         oneDriveEnabled = options.OneDriveEnabled,
@@ -53,6 +62,7 @@ app.MapGet("/api/people_map_plus/sync/status", (
         syncIntervalHours = options.SyncIntervalHours,
         destinationSubdir = options.DestinationSubdir,
         runSyncOnStartup = options.RunSyncOnStartup,
+        hasStoredRefreshToken,
         lastSync = orchestrator.GetLastResult()
     });
 });
@@ -64,20 +74,34 @@ app.MapPost("/api/people_map_plus/sync/run", async (OneDriveSyncOrchestrator orc
     return Results.Json(result, statusCode: statusCode);
 });
 
+app.MapGet("/api/people_map_plus/onedrive/device/status", async (
+    OneDriveDeviceAuthService deviceAuthService,
+    CancellationToken cancellationToken) =>
+{
+    return Results.Ok(await deviceAuthService.GetStatusAsync(cancellationToken));
+});
+
+app.MapPost("/api/people_map_plus/onedrive/device/start", async (
+    OneDriveDeviceAuthService deviceAuthService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await deviceAuthService.StartAsync(cancellationToken);
+    var statusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest;
+    return Results.Json(result, statusCode: statusCode);
+});
+
+app.MapPost("/api/people_map_plus/onedrive/device/poll", async (
+    OneDriveDeviceAuthService deviceAuthService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await deviceAuthService.PollAsync(cancellationToken);
+    var statusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest;
+    return Results.Json(result, statusCode: statusCode);
+});
+
 app.MapGet("/", () =>
 {
-    return Results.Ok(new
-    {
-        name = "People Map Plus Backend",
-        message = "Add-on is running.",
-        endpoints = new[]
-        {
-            "/health",
-            "/api/people_map_plus/health",
-            "/api/people_map_plus/sync/status",
-            "/api/people_map_plus/sync/run"
-        }
-    });
+    return Results.Content(IngressPage.Html, "text/html");
 });
 
 app.Run();

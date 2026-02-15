@@ -7,7 +7,7 @@
 3. Supported account types:
    - personal only: `Personal Microsoft accounts only`
    - mixed org/personal: `Accounts in any organizational directory and personal Microsoft accounts`
-4. Redirect URI (mobile/desktop): `http://localhost`.
+4. Redirect URI is not required for device code flow.
 
 ## 2. API permissions
 
@@ -24,22 +24,12 @@ Grant consent where required.
 1. App registrations -> your app -> Certificates & secrets -> New client secret.
 2. Save generated secret value.
 
-## 4. Get refresh token
-
-Use OAuth authorization code flow once, then exchange code for refresh token.
-
-Token endpoint pattern:
-
-`https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token`
-
-For personal account tenant usually `consumers`.
-
-## 5. Fill Home Assistant add-on Configuration
+## 4. Fill Home Assistant add-on Configuration
 
 1. `onedrive_enabled: true`
 2. `onedrive_client_id: <app client id>`
 3. `onedrive_client_secret: <secret>` (if used)
-4. `onedrive_refresh_token: <refresh token>`
+4. `onedrive_refresh_token: ""` (leave empty for device code flow)
 5. `onedrive_tenant: consumers` (or your tenant id)
 6. `onedrive_folder_path: /` (or specific folder)
 7. `lookback_days: 5`
@@ -47,3 +37,12 @@ For personal account tenant usually `consumers`.
 
 Then Save and restart the add-on.
 
+## 5. Connect from add-on page (Device Code)
+
+1. Open add-on panel (ingress) and click `Connect to OneDrive`.
+2. Copy `user_code` and open shown Microsoft verification URL.
+3. Approve access in your Microsoft account.
+4. Back in add-on panel click `Check Authorization`.
+5. Add-on stores refresh token in `/data/onedrive_tokens.json`.
+
+After this, scheduled sync works without manually pasting tokens.
