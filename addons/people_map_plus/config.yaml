@@ -1,13 +1,13 @@
 name: "People Map Plus Backend"
-version: "0.1.15"
+version: "0.1.16"
 slug: "people_map_plus"
-description: "Backend API and indexing service for People Map Plus card"
+description: "OneDrive photo sync, resize and thumbnail generator for /media"
 url: "https://github.com/maxminsk/HaMapAddon"
 startup: services
 boot: auto
 init: false
-hassio_api: true
-homeassistant_api: true
+hassio_api: false
+homeassistant_api: false
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:map-marker-path

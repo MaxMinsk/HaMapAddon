@@ -1,10 +1,11 @@
 # People Map Plus Backend Add-on
 
-This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
+This Home Assistant add-on (C# / ASP.NET Core) is focused on OneDrive photo sync:
 
-1. Photo indexing from `/media` using EXIF GPS metadata.
-2. API endpoints used by the `custom:people-map-plus` Lovelace card.
-3. OneDrive sync (daily or custom interval) with download to `/media`.
+1. OneDrive sync (daily or custom interval) with download to `/media`.
+2. Automatic resize to configured `max_size`.
+3. Thumbnail generation (`thumb_` files, max side `320px`).
+4. Device Code authentication flow from add-on Web UI.
 
 ## Runtime
 
@@ -15,8 +16,6 @@ This Home Assistant add-on (C# / ASP.NET Core) hosts backend services for:
    - `/api/people_map_plus/health`
    - `/api/people_map_plus/sync/status`
    - `POST /api/people_map_plus/sync/run`
-   - `/api/people_map_plus/photos?limit=50&hours=24`
-   - `/api/people_map_plus/tracks?entities=person.max&days=1`
    - `/api/people_map_plus/onedrive/folders?path=/`
    - `POST /api/people_map_plus/onedrive/device/start`
    - `POST /api/people_map_plus/onedrive/device/poll`
@@ -61,35 +60,3 @@ Use `List Folders` in Web UI to discover valid `onedrive_folder_path` values wit
 6. Auto-resizes images larger than `max_size` on any side (aspect ratio preserved).
 7. Writes log entry when resize is required and when resize is completed/skipped.
 8. Generates `thumb_` preview copy for each image (max side `320px`) in the same folder.
-9. Extracts EXIF metadata (GPS + capture time when available) and stores index in SQLite.
-
-## Photos API for map layer
-
-`GET /api/people_map_plus/photos`
-
-Query params:
-
-1. `limit` - number of photos (`1..500`, default `50`).
-2. `hours` - recent window in hours (if `fromUtc` is not provided).
-3. `fromUtc` / `toUtc` - ISO-8601 UTC boundaries.
-4. `minLat`, `maxLat`, `minLon`, `maxLon` - optional bbox filter (all 4 required together).
-
-Response contains geotagged photos only, including:
-
-1. `itemId`
-2. `capturedAtUtc`
-3. `lat` / `lon`
-4. `mediaUrl` (`/media/local/...`)
-5. `thumbnailUrl` (`/media/local/...` for `thumb_` file)
-
-## Tracks API for map layer
-
-`GET /api/people_map_plus/tracks`
-
-Query params:
-
-1. `entities` - required comma-separated entities (`person.max,person.maria`).
-2. `days` - period in days (`1..30`, default `1`) when `fromUtc` is not provided.
-3. `fromUtc` / `toUtc` - optional ISO-8601 UTC bounds.
-4. `maxPoints` - max points per entity (`50..5000`, default `500`).
-5. `minDistanceMeters` - simple distance dedupe (`0..2000`, default `0`).
