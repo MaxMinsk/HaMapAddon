@@ -1,5 +1,5 @@
 name: "People Map Plus Backend"
-version: "0.1.0"
+version: "0.1.1"
 slug: "people_map_plus"
 description: "Backend API and indexing service for People Map Plus card"
 url: "https://github.com/maxminsk/HaMapAddon"

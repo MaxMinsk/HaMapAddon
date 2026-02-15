@@ -14,7 +14,7 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
   exit 1
 fi
 
-CONFIG_VERSION="$(sed -n 's/^version:[[:space:]]*"\([^"]\+\)".*$/\1/p' "${CONFIG_FILE}" | head -n1)"
+CONFIG_VERSION="$(awk -F'"' '/^version:[[:space:]]*"/ { print $2; exit }' "${CONFIG_FILE}")"
 
 if [[ -z "${CONFIG_VERSION}" ]]; then
   echo "Cannot parse version from ${CONFIG_FILE}" >&2
@@ -27,4 +27,3 @@ if [[ "${CONFIG_VERSION}" != "${VERSION}" ]]; then
 fi
 
 echo "Release check passed for version ${VERSION}."
-
