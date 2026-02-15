@@ -1,5 +1,5 @@
 name: "People Map Plus Backend"
-version: "0.1.11"
+version: "0.1.12"
 slug: "people_map_plus"
 description: "Backend API and indexing service for People Map Plus card"
 url: "https://github.com/maxminsk/HaMapAddon"
@@ -32,6 +32,7 @@ options:
   lookback_days: 5
   sync_interval_hours: 24
   max_files_per_run: 500
+  max_size: 2500
   run_sync_on_startup: true
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
@@ -47,4 +48,5 @@ schema:
   lookback_days: int(1,30)?
   sync_interval_hours: int(1,168)?
   max_files_per_run: int(1,2000)?
+  max_size: int(512,10000)?
   run_sync_on_startup: bool?

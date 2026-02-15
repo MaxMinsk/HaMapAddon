@@ -43,6 +43,9 @@ public sealed class AddonOptions
     [JsonPropertyName("max_files_per_run")]
     public int? MaxFilesPerRun { get; init; } = 500;
 
+    [JsonPropertyName("max_size")]
+    public int? MaxSize { get; init; } = 2500;
+
     [JsonPropertyName("run_sync_on_startup")]
     public bool? RunSyncOnStartup { get; init; } = true;
 }
@@ -61,6 +64,6 @@ public sealed record NormalizedAddonOptions(
     int LookbackDays,
     int SyncIntervalHours,
     int MaxFilesPerRun,
+    int MaxSize,
     bool RunSyncOnStartup
 );
-

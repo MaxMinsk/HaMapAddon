@@ -42,7 +42,7 @@ app.MapGet("/api/people_map_plus/health", (OneDriveSyncOrchestrator orchestrator
     {
         status = "ok",
         backend = "csharp",
-        version = "0.1.11",
+        version = "0.1.12",
         lastSync = orchestrator.GetLastResult()
     });
 });
@@ -60,6 +60,7 @@ app.MapGet("/api/people_map_plus/sync/status", async (
         oneDriveEnabled = options.OneDriveEnabled,
         lookbackDays = options.LookbackDays,
         syncIntervalHours = options.SyncIntervalHours,
+        maxSize = options.MaxSize,
         destinationSubdir = options.DestinationSubdir,
         runSyncOnStartup = options.RunSyncOnStartup,
         hasStoredRefreshToken,

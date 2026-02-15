@@ -32,8 +32,6 @@ public sealed record OneDriveFolderListResult(
 
 public sealed class OneDriveSyncOrchestrator
 {
-    private const int MaxImageSidePx = 2500;
-
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg",
@@ -373,6 +371,7 @@ public sealed class OneDriveSyncOrchestrator
                         && string.Equals(existing.ETag, remoteFile.ETag, StringComparison.Ordinal)
                         && File.Exists(existing.LocalPath))
                     {
+                        await ResizeImageIfNeededAsync(existing.LocalPath, options.MaxSize, cancellationToken, "existing");
                         skipped++;
                         continue;
                     }
@@ -380,7 +379,7 @@ public sealed class OneDriveSyncOrchestrator
                     var localPath = BuildLocalPath(options.DestinationSubdir, remoteFile);
                     try
                     {
-                        await DownloadFileAsync(remoteFile.DownloadUrl, localPath, cancellationToken);
+                        await DownloadFileAsync(remoteFile.DownloadUrl, localPath, options.MaxSize, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -690,7 +689,7 @@ public sealed class OneDriveSyncOrchestrator
         return string.IsNullOrWhiteSpace(normalized) ? "photo" : normalized;
     }
 
-    private async Task DownloadFileAsync(string sourceUrl, string destinationPath, CancellationToken cancellationToken)
+    private async Task DownloadFileAsync(string sourceUrl, string destinationPath, int maxSize, CancellationToken cancellationToken)
     {
         using var client = _httpClientFactory.CreateClient(nameof(OneDriveSyncOrchestrator));
         using var response = await client.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -703,11 +702,11 @@ public sealed class OneDriveSyncOrchestrator
             await source.CopyToAsync(target, cancellationToken);
         }
 
-        await ResizeImageIfNeededAsync(tempPath, cancellationToken);
+        await ResizeImageIfNeededAsync(tempPath, maxSize, cancellationToken, "downloaded");
         File.Move(tempPath, destinationPath, overwrite: true);
     }
 
-    private async Task ResizeImageIfNeededAsync(string imagePath, CancellationToken cancellationToken)
+    private async Task ResizeImageIfNeededAsync(string imagePath, int maxSize, CancellationToken cancellationToken, string source)
     {
         var resizedPath = imagePath + ".resized";
         try
@@ -718,13 +717,22 @@ public sealed class OneDriveSyncOrchestrator
                 return;
             }
 
-            if (info.Width <= MaxImageSidePx && info.Height <= MaxImageSidePx)
+            if (info.Width <= maxSize && info.Height <= maxSize)
             {
                 return;
             }
 
+            _logger.LogInformation(
+                "Resize required ({Source}) for {ImagePath}: {OriginalWidth}x{OriginalHeight}, max side={MaxSize}.",
+                source,
+                imagePath,
+                info.Width,
+                info.Height,
+                maxSize
+            );
+
             var maxSide = Math.Max(info.Width, info.Height);
-            var scale = (double)MaxImageSidePx / maxSide;
+            var scale = (double)maxSize / maxSide;
             var targetWidth = Math.Max(1, (int)Math.Round(info.Width * scale));
             var targetHeight = Math.Max(1, (int)Math.Round(info.Height * scale));
 
@@ -749,7 +757,7 @@ public sealed class OneDriveSyncOrchestrator
         }
         catch (SixLabors.ImageSharp.UnknownImageFormatException)
         {
-            // Keep original file for unsupported codecs (for example HEIC when decoder is unavailable).
+            _logger.LogInformation("Resize skipped for {ImagePath}: unsupported image format.", imagePath);
         }
         catch (Exception ex)
         {

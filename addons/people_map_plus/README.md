@@ -36,7 +36,8 @@ Configure from Add-on page -> **Configuration**:
 10. `lookback_days` - how many days back to process (default 5).
 11. `sync_interval_hours` - sync interval in hours (default 24).
 12. `max_files_per_run` - safety cap per sync run.
-13. `run_sync_on_startup` - run once when add-on starts.
+13. `max_size` - max side (px) after resize, default `2500`.
+14. `run_sync_on_startup` - run once when add-on starts.
 
 ## Connect to OneDrive from add-on page
 
@@ -55,4 +56,5 @@ Use `List Folders` in Web UI to discover valid `onedrive_folder_path` values wit
 3. Downloads supported image types (`jpg`, `jpeg`, `png`, `heic`, `heif`, `webp`).
 4. Avoids duplicates by OneDrive `item_id` + `eTag`.
 5. Supports Device Code connect flow from ingress page (`Connect to OneDrive`).
-6. Auto-resizes images larger than 2500px on any side to max side 2500px (aspect ratio preserved).
+6. Auto-resizes images larger than `max_size` on any side (aspect ratio preserved).
+7. Writes log entry when resize is required and when resize is completed/skipped.

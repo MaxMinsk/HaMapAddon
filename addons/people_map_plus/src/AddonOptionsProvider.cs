@@ -52,6 +52,7 @@ public sealed class AddonOptionsProvider
             LookbackDays: Clamp(raw.LookbackDays ?? 5, 1, 30),
             SyncIntervalHours: Clamp(raw.SyncIntervalHours ?? 24, 1, 168),
             MaxFilesPerRun: Clamp(raw.MaxFilesPerRun ?? 500, 1, 2000),
+            MaxSize: Clamp(raw.MaxSize ?? 2500, 512, 10000),
             RunSyncOnStartup: raw.RunSyncOnStartup ?? true
         );
     }
@@ -120,4 +121,3 @@ public sealed class AddonOptionsProvider
         return new string(chars);
     }
 }
-
