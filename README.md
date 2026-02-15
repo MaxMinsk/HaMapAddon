@@ -46,6 +46,7 @@ Quick local helper:
 
 ## Notes
 
-1. Current add-on runtime is ASP.NET Core scaffold (`net8.0`) with health endpoints.
+1. Current add-on runtime is ASP.NET Core (`net8.0`) with OneDrive sync scaffold and `/media` downloads.
 2. UI card distribution options are documented in `docs/ui-card-distribution-options.md`.
 3. HACS-ready UI card repository template is available in `card-repo-template/`.
+4. OneDrive setup notes: `docs/onedrive-setup.md`.

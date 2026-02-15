@@ -2,6 +2,8 @@
 node_modules/
 dist/
 build/
+bin/
+obj/
 .venv/
 __pycache__/
 *.pyc
@@ -10,4 +12,3 @@ __pycache__/
 .idea/
 .vscode/.history/
 tmp/
-
