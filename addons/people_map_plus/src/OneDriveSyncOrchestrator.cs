@@ -156,17 +156,23 @@ public sealed class OneDriveSyncOrchestrator
         }
 
         var stateKeyPrefix = BuildStateKeyPrefix(options);
-        var deltaLink = _repository.GetState($"{stateKeyPrefix}:delta_link");
-        var pageUrl = string.IsNullOrWhiteSpace(deltaLink) ? BuildInitialDeltaUrl(options) : deltaLink;
-        var deltaResetAttempted = false;
+        var driveResource = BuildDriveResource(options);
+        var pendingUrls = new Queue<string>();
+        pendingUrls.Enqueue(BuildInitialChildrenUrl(options, driveResource));
+        var visitedFolders = new HashSet<string>(StringComparer.Ordinal);
 
         var examined = 0;
         var skipped = 0;
         var downloaded = 0;
-        string? newestDeltaLink = null;
 
-        while (!string.IsNullOrWhiteSpace(pageUrl) && downloaded < options.MaxFilesPerRun)
+        while (pendingUrls.Count > 0 && downloaded < options.MaxFilesPerRun)
         {
+            var pageUrl = pendingUrls.Dequeue();
+            if (string.IsNullOrWhiteSpace(pageUrl))
+            {
+                continue;
+            }
+
             using var request = new HttpRequestMessage(HttpMethod.Get, pageUrl);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
@@ -176,23 +182,9 @@ public sealed class OneDriveSyncOrchestrator
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 var graphDetails = ExtractGraphError(body);
-
-                if (!deltaResetAttempted
-                    && ShouldResetDeltaState(response.StatusCode, graphDetails)
-                    && !string.IsNullOrWhiteSpace(deltaLink))
-                {
-                    deltaResetAttempted = true;
-                    _logger.LogInformation(
-                        "Detected invalid delta state. Resetting stored delta link and retrying from initial delta URL."
-                    );
-                    _repository.SetState($"{stateKeyPrefix}:delta_link", string.Empty);
-                    deltaLink = null;
-                    pageUrl = BuildInitialDeltaUrl(options);
-                    continue;
-                }
-
                 _logger.LogWarning(
-                    "Graph delta request failed. Status={StatusCode}, Details={Details}, Body={Body}",
+                    "Graph request failed. Url={Url}, Status={StatusCode}, Details={Details}, Body={Body}",
+                    pageUrl,
                     (int)response.StatusCode,
                     graphDetails,
                     Truncate(body, 400)
@@ -218,10 +210,15 @@ public sealed class OneDriveSyncOrchestrator
             {
                 foreach (var item in items.EnumerateArray())
                 {
-                    examined++;
                     if (downloaded >= options.MaxFilesPerRun)
                     {
                         break;
+                    }
+
+                    if (TryGetFolderId(item, out var folderId) && visitedFolders.Add(folderId))
+                    {
+                        pendingUrls.Enqueue(BuildFolderChildrenUrl(driveResource, folderId));
+                        continue;
                     }
 
                     if (!TryParseDriveFile(item, out var remoteFile))
@@ -230,6 +227,7 @@ public sealed class OneDriveSyncOrchestrator
                         continue;
                     }
 
+                    examined++;
                     if (remoteFile.LastModifiedUtc < cutoffUtc)
                     {
                         skipped++;
@@ -279,26 +277,18 @@ public sealed class OneDriveSyncOrchestrator
                 }
             }
 
-            if (root.TryGetProperty("@odata.deltaLink", out var deltaLinkElement))
+            if (root.TryGetProperty("@odata.nextLink", out var nextLinkElement))
             {
-                newestDeltaLink = deltaLinkElement.GetString();
-                pageUrl = null;
-            }
-            else if (root.TryGetProperty("@odata.nextLink", out var nextLinkElement))
-            {
-                pageUrl = nextLinkElement.GetString();
-            }
-            else
-            {
-                pageUrl = null;
+                var nextLink = nextLinkElement.GetString();
+                if (!string.IsNullOrWhiteSpace(nextLink))
+                {
+                    pendingUrls.Enqueue(nextLink);
+                }
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(newestDeltaLink))
-        {
-            _repository.SetState($"{stateKeyPrefix}:delta_link", newestDeltaLink);
-        }
-
+        // We intentionally use children traversal (not delta) for stability with personal OneDrive.
+        _repository.SetState($"{stateKeyPrefix}:delta_link", string.Empty);
         _repository.SetState($"{stateKeyPrefix}:last_sync_utc", DateTimeOffset.UtcNow.ToString("O"));
 
         _logger.LogInformation(
@@ -372,18 +362,26 @@ public sealed class OneDriveSyncOrchestrator
         return accessToken.GetString();
     }
 
-    private static string BuildInitialDeltaUrl(NormalizedAddonOptions options)
+    private static string BuildDriveResource(NormalizedAddonOptions options)
     {
-        var driveResource = string.IsNullOrWhiteSpace(options.OneDriveDriveId)
+        return string.IsNullOrWhiteSpace(options.OneDriveDriveId)
             ? "me/drive"
             : $"drives/{Uri.EscapeDataString(options.OneDriveDriveId)}";
+    }
 
+    private static string BuildInitialChildrenUrl(NormalizedAddonOptions options, string driveResource)
+    {
         if (options.OneDriveFolderPath == "/")
         {
-            return $"https://graph.microsoft.com/v1.0/{driveResource}/root/delta";
+            return $"https://graph.microsoft.com/v1.0/{driveResource}/root/children?$top=200";
         }
 
-        return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(options.OneDriveFolderPath)}:/delta";
+        return $"https://graph.microsoft.com/v1.0/{driveResource}/root:{EncodeDrivePath(options.OneDriveFolderPath)}:/children?$top=200";
+    }
+
+    private static string BuildFolderChildrenUrl(string driveResource, string folderItemId)
+    {
+        return $"https://graph.microsoft.com/v1.0/{driveResource}/items/{Uri.EscapeDataString(folderItemId)}/children?$top=200";
     }
 
     private static string BuildStateKeyPrefix(NormalizedAddonOptions options)
@@ -449,6 +447,29 @@ public sealed class OneDriveSyncOrchestrator
             SizeBytes: sizeBytes,
             LastModifiedUtc: lastModifiedUtc
         );
+        return true;
+    }
+
+    private static bool TryGetFolderId(JsonElement element, out string folderId)
+    {
+        folderId = string.Empty;
+        if (!element.TryGetProperty("folder", out _))
+        {
+            return false;
+        }
+
+        if (!element.TryGetProperty("id", out var idElement))
+        {
+            return false;
+        }
+
+        var id = idElement.GetString();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return false;
+        }
+
+        folderId = id;
         return true;
     }
 
@@ -558,24 +579,6 @@ public sealed class OneDriveSyncOrchestrator
         }
 
         return body;
-    }
-
-    private static bool ShouldResetDeltaState(System.Net.HttpStatusCode statusCode, string details)
-    {
-        if (statusCode is not System.Net.HttpStatusCode.BadRequest and not System.Net.HttpStatusCode.Gone)
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(details))
-        {
-            return false;
-        }
-
-        return details.Contains("ObjectHandle is Invalid", StringComparison.OrdinalIgnoreCase)
-               || details.Contains("syncStateNotFound", StringComparison.OrdinalIgnoreCase)
-               || details.Contains("resyncRequired", StringComparison.OrdinalIgnoreCase)
-               || details.Contains("delta token", StringComparison.OrdinalIgnoreCase);
     }
 
     private SyncResult Remember(SyncResult result)
